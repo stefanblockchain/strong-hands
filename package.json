@@ -1,0 +1,30 @@
+{
+  "name": "strong-hands",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://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@github.com/stefanblockchain/strong-hands.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/stefanblockchain/strong-hands/issues"
+  },
+  "homepage": "https://github.com/stefanblockchain/strong-hands#readme",
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^2.0.0",
+    "@nomiclabs/hardhat-etherscan": "^3.1.0",
+    "@openzeppelin/contracts": "^4.7.3",
+    "hardhat": "^2.11.2",
+    "hardhat-contract-sizer": "^2.6.1",
+    "hardhat-gas-reporter": "^1.0.9",
+    "solhint": "^3.3.7",
+    "solidity-coverage": "^0.8.2"
+  }
+}
