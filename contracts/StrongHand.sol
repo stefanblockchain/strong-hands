@@ -10,6 +10,7 @@ contract StrongHand is Ownable {
     uint256 private lockTime;
     uint256 private totalSupply;
     uint256 private totalDividends;
+    uint256 private unclaimedDividends;
     uint256 private constant POINT_MULTIPLIER = 10 ^ 18;
 
     ILendingPool private immutable lendingPool;
@@ -32,6 +33,11 @@ contract StrongHand is Ownable {
     event ReedemEvent(address indexed reedemer, uint256 amount);
     event OwnerInterestEvent(address indexed owner, uint256 amount);
 
+    error ValueSentIsZeroError();
+    error NoTokensToReedemError(address account);
+    error NoInterestToReedemError(address owner);
+    error SendingEtherFailedError();
+
     constructor(
         uint256 _lockTime,
         address _lendingPoolAddress,
@@ -45,7 +51,7 @@ contract StrongHand is Ownable {
     }
 
     function deposit() external payable {
-        require(msg.value > 0, "Balance must be greater then 0");
+        if (msg.value == 0) revert ValueSentIsZeroError();
 
         UserDeposit memory userDeposit = userDeposits[msg.sender];
         userDeposit.balance += msg.value;
@@ -58,43 +64,73 @@ contract StrongHand is Ownable {
 
     function reedem() external {
         UserDeposit memory userDeposit = userDeposits[msg.sender];
-        require(userDeposit.balance > 0, "No tokens to reedem");
-        //check if user can reedem with out fees -> reedem everyting
-        
-        //else -> calculate how much fee he gets
-        // -> subtruct fee and update totalDividends
-        // -> then send ether to user
+        if (userDeposit.balance == 0) revert NoTokensToReedemError(msg.sender);
+        _updateUserShare(msg.sender);
+        uint256 userFee = calculateAccountFee(userDeposit);
+        uint256 userWithdraw = userDeposit.balance - userFee;
+        if (userFee > 0) {
+            totalDividends += ((userFee * POINT_MULTIPLIER) / totalSupply);
+            unclaimedDividends += userFee;
+        }
+        totalSupply -= userWithdraw;
+        delete userDeposits[msg.sender];
+        _removeFromLendingPool(msg.sender, userWithdraw);
         emit ReedemEvent(msg.sender, userDeposits[msg.sender].balance);
     }
 
     function takeInterest() external onlyOwner {
         uint256 balance = iAToken.balanceOf(address(this));
-        require(balance > totalSupply, "No tokens to reedem");
-
-        // iAToken.burn(address(this), address(this), balance, 0);
-        weith.withdraw(balance);
-        (bool sent, ) = msg.sender.call{value: balance}("");
-        require(sent, "Sending ether failed");
-        emit OwnerInterestEvent(msg.sender, balance);
+        if (balance <= totalSupply) revert NoInterestToReedemError(msg.sender);
+        uint256 withdrawAmount = balance - totalSupply;
+        _removeFromLendingPool(msg.sender, withdrawAmount);
+        emit OwnerInterestEvent(msg.sender, withdrawAmount);
     }
 
     function getLockTime() public view returns (uint256) {
         return lockTime;
     }
 
-    function getUserRemainingTime(address _account)
+    function calculateAccountFee(UserDeposit memory userDeposit)
         public
         view
         returns (uint256)
     {
-        require(
-            userDeposits[_account].reedemTime > 0,
-            "User not deposited anything"
-        );
-        return block.timestamp - userDeposits[_account].reedemTime;
+        if (userDeposit.reedemTime < block.timestamp) return uint256(0);
+        uint256 currentDistance = (block.timestamp -
+            (userDeposit.reedemTime - lockTime));
+        uint256 interval = ((userDeposit.reedemTime - lockTime) /
+            userDeposit.reedemTime);
+        uint256 total = currentDistance / interval;
+        return userDeposit.balance * (50 - total);
     }
 
-    function isSafeToWithdraw(address _account) public view returns (bool) {
-        return userDeposits[_account].reedemTime < block.timestamp;
+    function _getUserShareAmount(address account)
+        private
+        view
+        returns (uint256)
+    {
+        UserDeposit memory userDeposit = userDeposits[account];
+        uint256 userDividendPoints = totalDividends - userDeposit.lastDivident;
+        return (userDeposit.balance * userDividendPoints) / POINT_MULTIPLIER;
+    }
+
+    function _updateUserShare(address account) private {
+        uint256 userShare = _getUserShareAmount(account);
+        if (userShare > 0) {
+            UserDeposit memory userDeposit = userDeposits[account];
+            unclaimedDividends -= userShare;
+            userDeposit.balance += userShare;
+            userDeposit.lastDivident = totalDividends;
+            userDeposits[account] = userDeposit;
+        }
+    }
+
+    function _removeFromLendingPool(address account, uint256 withdrawAmount)
+        private
+    {
+        lendingPool.withdraw(address(weith), withdrawAmount, address(this));
+        weith.withdraw(withdrawAmount);
+        (bool sent, ) = account.call{value: withdrawAmount}("");
+        if (!sent) revert SendingEtherFailedError();
     }
 }

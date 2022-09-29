@@ -23,8 +23,12 @@
     "@openzeppelin/contracts": "^4.7.3",
     "hardhat": "^2.11.2",
     "hardhat-contract-sizer": "^2.6.1",
+    "hardhat-deploy": "^0.11.15",
     "hardhat-gas-reporter": "^1.0.9",
     "solhint": "^3.3.7",
     "solidity-coverage": "^0.8.2"
+  },
+  "dependencies": {
+    "dotenv": "^16.0.2"
   }
 }
