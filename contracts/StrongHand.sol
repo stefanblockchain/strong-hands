@@ -5,6 +5,7 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "./interfaces/IWETH.sol";
 import "./interfaces/ILendingPool.sol";
+import "./interfaces/IFeeStrategy.sol";
 
 contract StrongHand is Ownable {
     uint256 private lockTime;
@@ -16,6 +17,7 @@ contract StrongHand is Ownable {
     ILendingPool private immutable lendingPool;
     IWETH private immutable weith;
     IERC20 private immutable iAToken;
+    IFeeStrategy private feeStrategy;
 
     struct UserDeposit {
         uint256 reedemTime;
@@ -37,17 +39,20 @@ contract StrongHand is Ownable {
     error NoTokensToReedemError(address account);
     error NoInterestToReedemError(address owner);
     error SendingEtherFailedError();
+    error ZeroAddressError();
 
     constructor(
         uint256 _lockTime,
         address _lendingPoolAddress,
         address _weithAddress,
-        address _iATokenAddress
+        address _iATokenAddress,
+        address _feeStrategyAddress
     ) {
         lockTime = _lockTime;
         lendingPool = ILendingPool(_lendingPoolAddress);
         weith = IWETH(_weithAddress);
         iAToken = IERC20(_iATokenAddress);
+        feeStrategy = IFeeStrategy(_feeStrategyAddress);
     }
 
     function deposit() external payable {
@@ -56,9 +61,9 @@ contract StrongHand is Ownable {
         UserDeposit memory userDeposit = userDeposits[msg.sender];
         userDeposit.balance += msg.value;
         userDeposit.reedemTime = block.timestamp + lockTime;
+        _depositToLendingPool(msg.value);
         totalSupply += msg.value;
-        weith.deposit{value: msg.value}();
-        lendingPool.deposit(address(weith), msg.value, address(this), 0);
+        userDeposits[msg.sender] = userDeposit;
         emit DepositEvent(msg.sender, msg.value, userDeposit.reedemTime);
     }
 
@@ -66,7 +71,11 @@ contract StrongHand is Ownable {
         UserDeposit memory userDeposit = userDeposits[msg.sender];
         if (userDeposit.balance == 0) revert NoTokensToReedemError(msg.sender);
         _updateUserShare(msg.sender);
-        uint256 userFee = calculateAccountFee(userDeposit);
+        uint256 userFee = feeStrategy.calculateAccountFee(
+            userDeposit.reedemTime,
+            lockTime,
+            userDeposit.balance
+        );
         uint256 userWithdraw = userDeposit.balance - userFee;
         if (userFee > 0) {
             totalDividends += ((userFee * POINT_MULTIPLIER) / totalSupply);
@@ -90,18 +99,23 @@ contract StrongHand is Ownable {
         return lockTime;
     }
 
-    function calculateAccountFee(UserDeposit memory userDeposit)
+    function setFeeStrategy(address _feeStrategyAddress) external onlyOwner {
+        if (_feeStrategyAddress == address(0)) revert ZeroAddressError();
+        feeStrategy = IFeeStrategy(_feeStrategyAddress);
+    }
+
+    function calculateAccountFee(address account)
         public
         view
         returns (uint256)
     {
-        if (userDeposit.reedemTime < block.timestamp) return uint256(0);
-        uint256 currentDistance = (block.timestamp -
-            (userDeposit.reedemTime - lockTime));
-        uint256 interval = ((userDeposit.reedemTime - lockTime) /
-            userDeposit.reedemTime);
-        uint256 total = currentDistance / interval;
-        return userDeposit.balance * (50 - total);
+        UserDeposit memory userDeposit = userDeposits[account];
+        return
+            feeStrategy.calculateAccountFee(
+                userDeposit.reedemTime,
+                lockTime,
+                userDeposit.balance
+            );
     }
 
     function _getUserShareAmount(address account)
@@ -132,5 +146,10 @@ contract StrongHand is Ownable {
         weith.withdraw(withdrawAmount);
         (bool sent, ) = account.call{value: withdrawAmount}("");
         if (!sent) revert SendingEtherFailedError();
+    }
+
+    function _depositToLendingPool(uint256 depositAmount) private {
+        weith.deposit{value: depositAmount}();
+        lendingPool.deposit(address(weith), depositAmount, address(this), 0);
     }
 }
