@@ -2,10 +2,12 @@
 pragma solidity ^0.8.9;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "./interfaces/IWETH.sol";
-import "./interfaces/ILendingPool.sol";
 import "./interfaces/IFeeStrategy.sol";
+import "./interfaces/IWETHGateway.sol";
+import "@aave/core-v3/contracts/interfaces/IPoolAddressesProvider.sol";
+import "@aave/core-v3/contracts/interfaces/IPool.sol";
+import "@aave/core-v3/contracts/interfaces/IAToken.sol";
 
 contract StrongHand is Ownable {
     uint256 private lockTime;
@@ -14,10 +16,11 @@ contract StrongHand is Ownable {
     uint256 private unclaimedDividends;
     uint256 private constant POINT_MULTIPLIER = 10 ^ 18;
 
-    ILendingPool private immutable lendingPool;
+    IPoolAddressesProvider private immutable poolAddressesProvider;
     IWETH private immutable weith;
-    IERC20 private immutable iAToken;
+    IAToken private immutable iAToken;
     IFeeStrategy private feeStrategy;
+    IWETHGateway private wethGateway;
 
     struct UserDeposit {
         uint256 reedemTime;
@@ -43,16 +46,20 @@ contract StrongHand is Ownable {
 
     constructor(
         uint256 _lockTime,
-        address _lendingPoolAddress,
+        address _poolAddressesProviderAddress,
         address _weithAddress,
         address _iATokenAddress,
-        address _feeStrategyAddress
+        address _feeStrategyAddress,
+        address _wethGatewayAddress
     ) {
         lockTime = _lockTime;
-        lendingPool = ILendingPool(_lendingPoolAddress);
+        poolAddressesProvider = IPoolAddressesProvider(
+            _poolAddressesProviderAddress
+        );
         weith = IWETH(_weithAddress);
-        iAToken = IERC20(_iATokenAddress);
+        iAToken = IAToken(_iATokenAddress);
         feeStrategy = IFeeStrategy(_feeStrategyAddress);
+        wethGateway = IWETHGateway(_wethGatewayAddress);
     }
 
     function deposit() external payable {
@@ -118,6 +125,14 @@ contract StrongHand is Ownable {
             );
     }
 
+    function getUserDeposit(address account)
+        external
+        view
+        returns (UserDeposit memory)
+    {
+        return userDeposits[account];
+    }
+
     function _getUserShareAmount(address account)
         private
         view
@@ -142,14 +157,21 @@ contract StrongHand is Ownable {
     function _removeFromLendingPool(address account, uint256 withdrawAmount)
         private
     {
-        lendingPool.withdraw(address(weith), withdrawAmount, address(this));
-        weith.withdraw(withdrawAmount);
-        (bool sent, ) = account.call{value: withdrawAmount}("");
-        if (!sent) revert SendingEtherFailedError();
+        iAToken.allowance(address(this), address(wethGateway));
+        wethGateway.withdrawETH(_getPool(), withdrawAmount, account);
     }
 
     function _depositToLendingPool(uint256 depositAmount) private {
-        weith.deposit{value: depositAmount}();
-        lendingPool.deposit(address(weith), depositAmount, address(this), 0);
+        wethGateway.depositETH{value: depositAmount}(
+            _getPool(),
+            address(this),
+            0
+        );
     }
+
+    function _getPool() private view returns (address) {
+        return poolAddressesProvider.getPool();
+    }
+
+    receive() external payable {}
 }

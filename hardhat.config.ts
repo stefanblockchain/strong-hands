@@ -25,7 +25,7 @@ const config: HardhatUserConfig = {
   networks: {
     hardhat: {
       forking: {
-        url: MAINNET_RPC_URL
+        url: GOERLI_RPC_URL
       },
       chainId: 31337,
     },
@@ -43,7 +43,16 @@ const config: HardhatUserConfig = {
       chainId: 1,
     },
   },
-  solidity: "0.8.17",
+  solidity: {
+    compilers: [
+        {
+            version: "0.8.17",
+        },
+        {
+            version: "0.8.10",
+        },
+    ],
+},
   mocha: {
     timeout: 500000, // 500 seconds max for running tests
   }
