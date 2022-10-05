@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.9;
 
+import "hardhat/console.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "./interfaces/IWETH.sol";
 import "./interfaces/IFeeStrategy.sol";
 import "./interfaces/IWETHGateway.sol";
+import "./interfaces/IWETH.sol";
 import "@aave/core-v3/contracts/interfaces/IPoolAddressesProvider.sol";
 import "@aave/core-v3/contracts/interfaces/IPool.sol";
 import "@aave/core-v3/contracts/interfaces/IAToken.sol";
@@ -17,10 +18,10 @@ contract StrongHand is Ownable {
     uint256 private constant POINT_MULTIPLIER = 10 ^ 18;
 
     IPoolAddressesProvider private immutable poolAddressesProvider;
-    IWETH private immutable weith;
     IAToken private immutable iAToken;
     IFeeStrategy private feeStrategy;
-    IWETHGateway private wethGateway;
+    IWETHGateway private immutable wethGateway;
+    IWETH private immutable weth;
 
     struct UserDeposit {
         uint256 reedemTime;
@@ -41,25 +42,25 @@ contract StrongHand is Ownable {
     error ValueSentIsZeroError();
     error NoTokensToReedemError(address account);
     error NoInterestToReedemError(address owner);
-    error SendingEtherFailedError();
+    error SendingEtherFailedError(address account);
     error ZeroAddressError();
 
     constructor(
         uint256 _lockTime,
         address _poolAddressesProviderAddress,
-        address _weithAddress,
         address _iATokenAddress,
         address _feeStrategyAddress,
-        address _wethGatewayAddress
+        address _wethGatewayAddress,
+        address _wethAddress
     ) {
         lockTime = _lockTime;
         poolAddressesProvider = IPoolAddressesProvider(
             _poolAddressesProviderAddress
         );
-        weith = IWETH(_weithAddress);
         iAToken = IAToken(_iATokenAddress);
         feeStrategy = IFeeStrategy(_feeStrategyAddress);
         wethGateway = IWETHGateway(_wethGatewayAddress);
+        weth = IWETH(_wethAddress);
     }
 
     function deposit() external payable {
@@ -74,16 +75,16 @@ contract StrongHand is Ownable {
         emit DepositEvent(msg.sender, msg.value, userDeposit.reedemTime);
     }
 
-    function reedem() external {
+    function reedem() external returns (uint256 userWithdraw) {
         UserDeposit memory userDeposit = userDeposits[msg.sender];
-        if (userDeposit.balance == 0) revert NoTokensToReedemError(msg.sender);
         _updateUserShare(msg.sender);
+        if (userDeposit.balance == 0) revert NoTokensToReedemError(msg.sender);
         uint256 userFee = feeStrategy.calculateAccountFee(
             userDeposit.reedemTime,
             lockTime,
             userDeposit.balance
         );
-        uint256 userWithdraw = userDeposit.balance - userFee;
+        userWithdraw = userDeposit.balance - userFee;
         if (userFee > 0) {
             totalDividends += ((userFee * POINT_MULTIPLIER) / totalSupply);
             unclaimedDividends += userFee;
@@ -91,7 +92,7 @@ contract StrongHand is Ownable {
         totalSupply -= userWithdraw;
         delete userDeposits[msg.sender];
         _removeFromLendingPool(msg.sender, userWithdraw);
-        emit ReedemEvent(msg.sender, userDeposits[msg.sender].balance);
+        emit ReedemEvent(msg.sender, userWithdraw);
     }
 
     function takeInterest() external onlyOwner {
@@ -157,8 +158,16 @@ contract StrongHand is Ownable {
     function _removeFromLendingPool(address account, uint256 withdrawAmount)
         private
     {
-        iAToken.allowance(address(this), address(wethGateway));
-        wethGateway.withdrawETH(_getPool(), withdrawAmount, account);
+        address poolAddress = _getPool();
+        // wethGateway.withdrawETH(poolAddress, withdrawAmount, account);
+        IPool(poolAddress).withdraw(
+            address(weth),
+            withdrawAmount,
+            address(this)
+        );
+        weth.withdraw(withdrawAmount);
+        (bool success, ) = account.call{value: withdrawAmount}("");
+        if (!success) revert SendingEtherFailedError(account);
     }
 
     function _depositToLendingPool(uint256 depositAmount) private {

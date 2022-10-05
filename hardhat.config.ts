@@ -10,7 +10,7 @@ import * as dotenv from "dotenv";
 dotenv.config();
 
 const MAINNET_RPC_URL =
-  process.env.MAINNET_RPC_URL  || "https://rinkeby.infura.io/v3/api-key"
+  process.env.MAINNET_RPC_URL || "https://rpc-mumbai.maticvigil.com"
 const GOERLI_RPC_URL =
   process.env.GOERLI_RPC_URL || '"https://goerli.infura.io/v3/api-key"'
 
@@ -45,14 +45,26 @@ const config: HardhatUserConfig = {
   },
   solidity: {
     compilers: [
-        {
-            version: "0.8.17",
-        },
-        {
-            version: "0.8.10",
-        },
+      {
+        version: "0.8.17",
+        settings: {
+          optimizer: {
+            enabled: true,
+            runs: 200,
+          },
+        }
+      },
+      {
+        version: "0.8.10",
+        settings: {
+          optimizer: {
+            enabled: true,
+            runs: 200,
+          },
+        }
+      }
     ],
-},
+  },
   mocha: {
     timeout: 500000, // 500 seconds max for running tests
   }
