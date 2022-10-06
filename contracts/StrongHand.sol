@@ -76,8 +76,8 @@ contract StrongHand is Ownable {
     }
 
     function reedem() external returns (uint256 userWithdraw) {
-        UserDeposit memory userDeposit = userDeposits[msg.sender];
         _updateUserShare(msg.sender);
+        UserDeposit memory userDeposit = userDeposits[msg.sender];
         if (userDeposit.balance == 0) revert NoTokensToReedemError(msg.sender);
         uint256 userFee = feeStrategy.calculateAccountFee(
             userDeposit.reedemTime,
@@ -85,11 +85,11 @@ contract StrongHand is Ownable {
             userDeposit.balance
         );
         userWithdraw = userDeposit.balance - userFee;
+        totalSupply -= userWithdraw;
         if (userFee > 0) {
             totalDividends += ((userFee * POINT_MULTIPLIER) / totalSupply);
             unclaimedDividends += userFee;
         }
-        totalSupply -= userWithdraw;
         delete userDeposits[msg.sender];
         _removeFromLendingPool(msg.sender, userWithdraw);
         emit ReedemEvent(msg.sender, userWithdraw);
@@ -134,20 +134,19 @@ contract StrongHand is Ownable {
         return userDeposits[account];
     }
 
-    function _getUserShareAmount(address account)
+    function _getUserShareAmount(UserDeposit memory userDeposit)
         private
         view
         returns (uint256)
     {
-        UserDeposit memory userDeposit = userDeposits[account];
         uint256 userDividendPoints = totalDividends - userDeposit.lastDivident;
         return (userDeposit.balance * userDividendPoints) / POINT_MULTIPLIER;
     }
 
     function _updateUserShare(address account) private {
-        uint256 userShare = _getUserShareAmount(account);
+        UserDeposit memory userDeposit = userDeposits[account];
+        uint256 userShare = _getUserShareAmount(userDeposit);
         if (userShare > 0) {
-            UserDeposit memory userDeposit = userDeposits[account];
             unclaimedDividends -= userShare;
             userDeposit.balance += userShare;
             userDeposit.lastDivident = totalDividends;
