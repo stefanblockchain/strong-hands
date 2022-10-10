@@ -1,18 +1,31 @@
-import { ethers } from "hardhat";
+import { ethers, network } from "hardhat";
+import helperConfig from "../helper-hardhat-config";
+import verify from '../utils/verify';
 
 async function main() {
-  const currentTimestampInSeconds = Math.round(Date.now() / 1000);
-  const ONE_YEAR_IN_SECS = 365 * 24 * 60 * 60;
-  const unlockTime = currentTimestampInSeconds + ONE_YEAR_IN_SECS;
+  const name = network.name;
+  const networkConf = helperConfig.networkConfig.find(el => el.name === network.name);
+  const waitBlockConfirmations = 1;
 
-  const lockedAmount = ethers.utils.parseEther("1");
+  const feeStrategyArgs: any = [];
+  const feeStrategyV1 = await (await ethers.getContractFactory("FeeStrategyV1", feeStrategyArgs)).deploy(...feeStrategyArgs);
+  await feeStrategyV1.deployTransaction.wait(waitBlockConfirmations);
 
-  const Lock = await ethers.getContractFactory("Lock");
-  const lock = await Lock.deploy(unlockTime, { value: lockedAmount });
+  console.log(`Deployed contract FeeStrategyV1 on : ${feeStrategyV1.address} address`);
+  console.log(` FeeStrategyV1 args : ${feeStrategyArgs}`);
 
-  await lock.deployed();
+  const strongHandArgs: [number, string, string, string, string] = [networkConf!.lockTime!, networkConf!.poolAddressesProvider!, networkConf!.weithAToken!, feeStrategyV1.address, networkConf!.wethAddress!];
+  const StrongHand = await ethers.getContractFactory("StrongHand");
+  const strongHand = await StrongHand.deploy(...strongHandArgs);
+  await strongHand.deployTransaction.wait(waitBlockConfirmations);
 
-  console.log(`Lock with 1 ETH and unlock timestamp ${unlockTime} deployed to ${lock.address}`);
+  console.log(`Deployed contract StrongHand on : ${strongHand.address} address`);
+  console.log(` StrongHand args : ${strongHandArgs}`);
+
+  if (!helperConfig.developmentChains.includes(name) && process.env.ETHERSCAN_API_KEY) {
+    await verify(feeStrategyV1.address, feeStrategyArgs);
+    await verify(strongHand.address, strongHandArgs);
+  }
 }
 
 // We recommend this pattern to be able to use async/await everywhere

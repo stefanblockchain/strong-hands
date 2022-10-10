@@ -8,11 +8,13 @@ const networkConfig = [
         weithATokenWhale: "0xd89961f5aff8c9f0a106ca0bc4d8146da9db3c24",
         weithAToken: "0x27B4692C93959048833f40702b22FE3578E77759",
         wethGateway: "0xd5B55D3Ed89FDa19124ceB5baB620328287b915d",
+        lockTime: 24 * 60 * 60,
         chainId: 31337
     },
     {
         name: "localhost",
         keepersUpdateInterval: "30",
+        lockTime: 24 * 60 * 60,
         chainId: 31337
     },
     {
@@ -22,6 +24,7 @@ const networkConfig = [
         weithATokenWhale: "0xd89961f5aff8c9f0a106ca0bc4d8146da9db3c24",
         weithAToken: "0x27B4692C93959048833f40702b22FE3578E77759",
         wethGateway: "0xd5B55D3Ed89FDa19124ceB5baB620328287b915d",
+        lockTime: 24 * 60 * 60,
         chainId: 5
     },
     {

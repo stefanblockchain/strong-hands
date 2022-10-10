@@ -70,9 +70,8 @@ describe("Interest", function () {
     });
 
     it("Should emit event on interest take", async function () {
-        const { strongHand, ownerAccount, otherAccount, aaveTokenWhale, questAccount, lockTime, pool, weth, weithAToken } = await deployStrongHandFixture();
+        const { strongHand, ownerAccount, aaveTokenWhale, weithAToken } = await deployStrongHandFixture();
         const interestAmount = await weithAToken.balanceOf(aaveTokenWhale.address);
-        console.log(interestAmount);
         await weithAToken.connect(aaveTokenWhale).transfer(strongHand.address, interestAmount);
         await expect(strongHand.connect(ownerAccount).takeInterest()).to.emit(strongHand, "OwnerInterestEvent").withArgs(ownerAccount.address, interestAmount);
 
@@ -149,17 +148,75 @@ describe("Reedem", function () {
         currBalance = await questAccount.getBalance();
 
         expect(args![1]).to.be.greaterThan(depositAmount);
-        console.log("Amount", args![1].sub(depositAmount));
         expect(args![1]).to.be.equal(depositAmount.add(depositAmount).sub(exitAmount));
         expect(currBalance).to.be.equal(prevBalance.sub(gasPaid).add(args![1]));
+    });
+
+    it("Should update dividends correctly for multiple fees", async function () {
+        let reedemTxt, exitAmount, depositAmount, expectedAmmount, otherAccountBlockTime, questAccountBlockTime, dummyAccountBlockTime, currentBlockTime;
+        const { strongHand, otherAccount, questAccount, lockTime, dummyAccount, feeStrategyV1 } = await deployStrongHandFixture();
+
+        depositAmount = ethers.utils.parseEther("1");
+
+        otherAccountBlockTime = await getBlockTime((await (await strongHand.connect(otherAccount).deposit({ value: depositAmount })).wait()));
+        questAccountBlockTime = await getBlockTime((await (await strongHand.connect(questAccount).deposit({ value: depositAmount })).wait()));
+        dummyAccountBlockTime = await getBlockTime((await (await strongHand.connect(dummyAccount).deposit({ value: depositAmount })).wait()));
+        //questAccount
+        reedemTxt = await (await strongHand.connect(questAccount).reedem()).wait();
+        exitAmount = getTransactionArguments(reedemTxt)![1];
+        currentBlockTime = await getBlockTime(reedemTxt);
+        expectedAmmount = depositAmount.sub((await feeStrategyV1.calculateAccountFee(questAccountBlockTime + lockTime, lockTime, depositAmount)));
+        expect(exitAmount).to.be.equal(expectedAmmount);
+        await increaseTime(lockTime / 2);
+        // dummyAccount
+        reedemTxt = await (await strongHand.connect(dummyAccount).reedem()).wait();
+        exitAmount = getTransactionArguments(reedemTxt)![1];
+        currentBlockTime = await getBlockTime(reedemTxt);
+        expectedAmmount = depositAmount.sub((await feeStrategyV1.calculateAccountFee(dummyAccountBlockTime + lockTime, lockTime, depositAmount))).add(depositAmount.sub(expectedAmmount).div(2));
+        // expect(exitAmount).to.be.equal(expectedAmmount);
+        await increaseTime(lockTime / 2);
+        //otherAccount
+        reedemTxt = await (await strongHand.connect(otherAccount).reedem()).wait();
+        exitAmount = getTransactionArguments(reedemTxt)![1];
+        currentBlockTime = await getBlockTime(reedemTxt);
+        expectedAmmount = depositAmount.sub((await feeStrategyV1.calculateAccountFee(otherAccountBlockTime + lockTime, lockTime, depositAmount)));
+        // expect(exitAmount).to.be.equal(expectedAmmount);
+    });
+
+    it('Should not calculate fees, when reedmer is the only staked user', async function () {
+        let depositAmount, exitAmount, reedemTxt;
+        const { strongHand, otherAccount } = await deployStrongHandFixture();
+
+        depositAmount = ethers.utils.parseEther("1");
+        await strongHand.connect(otherAccount).deposit({ value: depositAmount });
+        reedemTxt = await (await strongHand.connect(otherAccount).reedem()).wait();
+        exitAmount = getTransactionArguments(reedemTxt)![1];
+        expect(exitAmount).to.be.equal(depositAmount);
+    });
+
+    it('Should keep user unclaimed dividends, when he deposits again', async function () {
+        let depositAmount, prevLastDivident, currLastDivident;
+        const { strongHand, otherAccount, questAccount } = await deployStrongHandFixture();
+
+        depositAmount = ethers.utils.parseEther("1");
+
+        await strongHand.connect(otherAccount).deposit({ value: depositAmount });
+        await strongHand.connect(questAccount).deposit({ value: depositAmount });
+        await strongHand.connect(questAccount).reedem();
+
+        prevLastDivident = (await strongHand.getUserDeposit(otherAccount.address)).lastDivident;
+        await strongHand.connect(otherAccount).deposit({ value: depositAmount });
+        currLastDivident = (await strongHand.getUserDeposit(otherAccount.address)).lastDivident;
+        
+        expect(prevLastDivident).to.be.equal(currLastDivident);
     });
 });
 
 
 async function deployStrongHandFixture() {
-    let strongHand, feeStrategyV1, networkConf: any, lockTime, ownerAccount, otherAccount, questAccount, poolAddressesProvider, pool, weth, aaveTokenWhale, weithAToken;
+    let strongHand, feeStrategyV1, networkConf: any, lockTime, ownerAccount, otherAccount, questAccount, poolAddressesProvider, pool, weth, aaveTokenWhale, weithAToken, dummyAccount;
 
-    [ownerAccount, otherAccount, questAccount] = await ethers.getSigners();
+    [ownerAccount, otherAccount, questAccount, dummyAccount] = await ethers.getSigners();
 
     lockTime = 24 * 60 * 60;
     networkConf = helperConfig.networkConfig.find(el => el.name === network.name);
@@ -167,7 +224,7 @@ async function deployStrongHandFixture() {
     feeStrategyV1 = await (await ethers.getContractFactory("FeeStrategyV1")).deploy();
 
     strongHand = await ethers.getContractFactory("StrongHand");
-    strongHand = await strongHand.deploy(lockTime, networkConf.poolAddressesProvider, networkConf.weithAToken, feeStrategyV1.address, networkConf.wethGateway, networkConf.wethAddress);
+    strongHand = await strongHand.deploy(lockTime, networkConf.poolAddressesProvider, networkConf.weithAToken, feeStrategyV1.address, networkConf.wethAddress);
 
     poolAddressesProvider = await ethers.getContractAt("IPoolAddressesProvider", networkConf.poolAddressesProvider);
     pool = await ethers.getContractAt("IPool", (await poolAddressesProvider.getPool()));
@@ -176,7 +233,7 @@ async function deployStrongHandFixture() {
     weithAToken = await ethers.getContractAt("IWETH", networkConf.weithAToken);
     aaveTokenWhale = await ethers.getImpersonatedSigner(networkConf.weithATokenWhale);
 
-    return { strongHand, feeStrategyV1, ownerAccount, otherAccount, questAccount, lockTime, poolAddressesProvider, pool, weth, aaveTokenWhale, weithAToken };
+    return { strongHand, feeStrategyV1, ownerAccount, otherAccount, questAccount, dummyAccount, lockTime, poolAddressesProvider, pool, weth, aaveTokenWhale, weithAToken };
 }
 
 async function calculateTransactionPrice(transaction: any) {
@@ -188,4 +245,14 @@ async function calculateTransactionPrice(transaction: any) {
 async function increaseTime(timeInSeconds: number) {
     await ethers.provider.send('evm_increaseTime', [timeInSeconds]);
     await network.provider.send("evm_mine");
+}
+
+async function getBlockTime(transaction: any = null) {
+    const lastBLockNumber = transaction ? transaction.logs[0].blockNumber : (await ethers.provider.getBlockNumber());
+    const lastBlock = await ethers.provider.getBlock(lastBLockNumber);
+    return lastBlock.timestamp;
+}
+
+function getTransactionArguments(transaction: any) {
+    return transaction.events ? transaction.events[transaction.events?.length - 1].args : transaction.events;
 }

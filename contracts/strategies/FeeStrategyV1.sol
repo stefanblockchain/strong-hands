@@ -17,11 +17,6 @@ contract FeeStrategyV1 is IFeeStrategy {
         if (reedemTime <= block.timestamp) return uint256(0);
         if (reedemTime - lockTime > block.timestamp)
             revert WrongTimeInputError(reedemTime);
-        console.log("Time");
-        console.log(
-            ((reedemTime - block.timestamp) * 50 * balance) /
-                (lockTime * 100)
-        );
         return
             ((reedemTime - block.timestamp) * 50 * balance) / (lockTime * 100);
     }

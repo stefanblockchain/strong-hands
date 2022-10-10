@@ -4,7 +4,6 @@ pragma solidity ^0.8.9;
 import "hardhat/console.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "./interfaces/IFeeStrategy.sol";
-import "./interfaces/IWETHGateway.sol";
 import "./interfaces/IWETH.sol";
 import "@aave/core-v3/contracts/interfaces/IPoolAddressesProvider.sol";
 import "@aave/core-v3/contracts/interfaces/IPool.sol";
@@ -15,12 +14,11 @@ contract StrongHand is Ownable {
     uint256 private totalSupply;
     uint256 private totalDividends;
     uint256 private unclaimedDividends;
-    uint256 private constant POINT_MULTIPLIER = 10 ^ 18;
+    uint256 private constant POINT_MULTIPLIER = 10e18;
 
     IPoolAddressesProvider private immutable poolAddressesProvider;
     IAToken private immutable iAToken;
     IFeeStrategy private feeStrategy;
-    IWETHGateway private immutable wethGateway;
     IWETH private immutable weth;
 
     struct UserDeposit {
@@ -50,7 +48,6 @@ contract StrongHand is Ownable {
         address _poolAddressesProviderAddress,
         address _iATokenAddress,
         address _feeStrategyAddress,
-        address _wethGatewayAddress,
         address _wethAddress
     ) {
         lockTime = _lockTime;
@@ -59,7 +56,6 @@ contract StrongHand is Ownable {
         );
         iAToken = IAToken(_iATokenAddress);
         feeStrategy = IFeeStrategy(_feeStrategyAddress);
-        wethGateway = IWETHGateway(_wethGatewayAddress);
         weth = IWETH(_wethAddress);
     }
 
@@ -67,32 +63,51 @@ contract StrongHand is Ownable {
         if (msg.value == 0) revert ValueSentIsZeroError();
 
         UserDeposit memory userDeposit = userDeposits[msg.sender];
+        if (userDeposit.balance == 0) userDeposit.lastDivident = totalDividends;
         userDeposit.balance += msg.value;
         userDeposit.reedemTime = block.timestamp + lockTime;
+
         _depositToLendingPool(msg.value);
         totalSupply += msg.value;
         userDeposits[msg.sender] = userDeposit;
         emit DepositEvent(msg.sender, msg.value, userDeposit.reedemTime);
     }
 
-    function reedem() external returns (uint256 userWithdraw) {
+    function reedem() external returns (uint256) {
         _updateUserShare(msg.sender);
         UserDeposit memory userDeposit = userDeposits[msg.sender];
+        uint256 _totalSupply = totalSupply - userDeposit.balance;
+
         if (userDeposit.balance == 0) revert NoTokensToReedemError(msg.sender);
+
+        if (_totalSupply == 0) {
+            totalSupply = _totalSupply;
+            delete userDeposits[msg.sender];
+            _removeFromLendingPool(msg.sender, userDeposit.balance);
+            emit ReedemEvent(msg.sender, userDeposit.balance);
+            return userDeposit.balance;
+        }
+
         uint256 userFee = feeStrategy.calculateAccountFee(
             userDeposit.reedemTime,
             lockTime,
             userDeposit.balance
         );
-        userWithdraw = userDeposit.balance - userFee;
-        totalSupply -= userWithdraw;
+
+        uint256 userWithdraw = userDeposit.balance - userFee;
+
         if (userFee > 0) {
-            totalDividends += ((userFee * POINT_MULTIPLIER) / totalSupply);
+            totalDividends += ((userFee * POINT_MULTIPLIER) / _totalSupply);
             unclaimedDividends += userFee;
         }
+
+        totalSupply -= userWithdraw;
+
         delete userDeposits[msg.sender];
+
         _removeFromLendingPool(msg.sender, userWithdraw);
         emit ReedemEvent(msg.sender, userWithdraw);
+        return userWithdraw;
     }
 
     function takeInterest() external onlyOwner {
@@ -105,6 +120,10 @@ contract StrongHand is Ownable {
 
     function getLockTime() public view returns (uint256) {
         return lockTime;
+    }
+
+    function getTotalSupply() public view returns (uint256) {
+        return totalSupply;
     }
 
     function setFeeStrategy(address _feeStrategyAddress) external onlyOwner {
@@ -158,7 +177,6 @@ contract StrongHand is Ownable {
         private
     {
         address poolAddress = _getPool();
-        // wethGateway.withdrawETH(poolAddress, withdrawAmount, account);
         IPool(poolAddress).withdraw(
             address(weth),
             withdrawAmount,
@@ -170,8 +188,12 @@ contract StrongHand is Ownable {
     }
 
     function _depositToLendingPool(uint256 depositAmount) private {
-        wethGateway.depositETH{value: depositAmount}(
-            _getPool(),
+        address poolAddress = _getPool();
+        weth.deposit{value: depositAmount}();
+        weth.approve(poolAddress, depositAmount);
+        IPool(poolAddress).deposit(
+            address(weth),
+            depositAmount,
             address(this),
             0
         );
