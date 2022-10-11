@@ -8,12 +8,16 @@ import "@aave/core-v3/contracts/interfaces/IPoolAddressesProvider.sol";
 import "@aave/core-v3/contracts/interfaces/IPool.sol";
 import "@aave/core-v3/contracts/interfaces/IAToken.sol";
 
+//@title Strong hand contract
+// @author Stefan Plazic
+// @notice This contract is for depositing ether to Avve contract, and making user wait lock time (to avoid fee) before removing their deposit
 contract StrongHand is Ownable {
     uint256 private lockTime;
     uint256 private totalSupply;
     uint256 private totalDividends;
     uint256 private unclaimedDividends;
     uint256 private constant POINT_MULTIPLIER = 10e18;
+    uint256 private constant DUST = 4 wei;
 
     IPoolAddressesProvider private immutable poolAddressesProvider;
     IAToken private immutable iAToken;
@@ -28,6 +32,7 @@ contract StrongHand is Ownable {
 
     mapping(address => UserDeposit) private userDeposits;
 
+    /* EVENTS */
     event DepositEvent(
         address indexed sender,
         uint256 amount,
@@ -36,6 +41,7 @@ contract StrongHand is Ownable {
     event ReedemEvent(address indexed reedemer, uint256 amount);
     event OwnerInterestEvent(address indexed owner, uint256 amount);
 
+    /* ERRORS */
     error ValueSentIsZeroError();
     error NoTokensToReedemError(address account);
     error NoInterestToReedemError(address owner);
@@ -58,6 +64,8 @@ contract StrongHand is Ownable {
         weth = IWETH(_wethAddress);
     }
 
+    //@title A functon for depositing ether
+    // @notice User needs to send some token, when calling this function
     function deposit() external payable {
         if (msg.value == 0) revert ValueSentIsZeroError();
 
@@ -72,19 +80,26 @@ contract StrongHand is Ownable {
         emit DepositEvent(msg.sender, msg.value, userDeposit.reedemTime);
     }
 
+    //@title A functon for reedeming staked ether
+    // @author Stefan Plazic
+    // @notice User will need to pay a fee if he reedems before reedemTime
+    // @dev Mechanism for keeping track about user dividends is done, by making user to pull their dividends, instead of calculating them for each user in deposit function
     function reedem() external returns (uint256) {
         _updateUserShare(msg.sender);
         UserDeposit memory userDeposit = userDeposits[msg.sender];
-        uint256 _totalSupply = totalSupply - userDeposit.balance;
-
         if (userDeposit.balance == 0) revert NoTokensToReedemError(msg.sender);
 
-        if (_totalSupply == 0) {
-            totalSupply = _totalSupply;
+        uint256 _totalSupply = totalSupply - userDeposit.balance;
+
+        //if this is only user, don't take fee from him
+        if (_totalSupply <= DUST) {
+            _totalSupply = totalSupply;
             delete userDeposits[msg.sender];
-            _removeFromLendingPool(msg.sender, userDeposit.balance);
-            emit ReedemEvent(msg.sender, userDeposit.balance);
-            return userDeposit.balance;
+            _removeFromLendingPool(msg.sender, _totalSupply);
+            emit ReedemEvent(msg.sender, _totalSupply);
+            totalSupply = 0;
+            unclaimedDividends = 0;
+            return _totalSupply;
         }
 
         uint256 userFee = feeStrategy.calculateAccountFee(
@@ -94,9 +109,10 @@ contract StrongHand is Ownable {
         );
 
         uint256 userWithdraw = userDeposit.balance - userFee;
-
+        //if user is reedeming before reedemTime -> take fee from his balance
         if (userFee > 0) {
-            totalDividends += ((userFee * POINT_MULTIPLIER) / _totalSupply);
+            totalDividends += ((userFee * POINT_MULTIPLIER) /
+                (_totalSupply - unclaimedDividends));
             unclaimedDividends += userFee;
         }
 
@@ -109,6 +125,10 @@ contract StrongHand is Ownable {
         return userWithdraw;
     }
 
+    //@title A functon for taking interest for owner
+    // @author Stefan Plazic
+    // @notice Only owner can call this function, if no interest error will be thrown
+    // @dev if a balance of Atoken if greater then totalSuppy variable, then diference shall be widthrawn and converted to ether, before sending it to the owner
     function takeInterest() external onlyOwner {
         uint256 balance = iAToken.balanceOf(address(this));
         if (balance <= totalSupply) revert NoInterestToReedemError(msg.sender);
@@ -130,6 +150,9 @@ contract StrongHand is Ownable {
         feeStrategy = IFeeStrategy(_feeStrategyAddress);
     }
 
+    //@title Caculate account fee for given account
+    // @author Stefan Plazic
+    // @dev This function calls FeeStrategy contract for calculating fee
     function calculateAccountFee(address account)
         public
         view
@@ -152,6 +175,8 @@ contract StrongHand is Ownable {
         return userDeposits[account];
     }
 
+    //@title Caculate user share of collected fees
+    // @author Stefan Plazic
     function _getUserShareAmount(UserDeposit memory userDeposit)
         private
         view
@@ -161,6 +186,8 @@ contract StrongHand is Ownable {
         return (userDeposit.balance * userDividendPoints) / POINT_MULTIPLIER;
     }
 
+    //@title Updates user balance with his share of unclaimed user fees
+    // @author Stefan Plazic
     function _updateUserShare(address account) private {
         UserDeposit memory userDeposit = userDeposits[account];
         uint256 userShare = _getUserShareAmount(userDeposit);
@@ -172,6 +199,9 @@ contract StrongHand is Ownable {
         }
     }
 
+    //@title Removes weth from avve contract
+    // @author Stefan Plazic
+    // @dev First weth is withdrawn to this contract, then converted to ether and sent to caller addressf
     function _removeFromLendingPool(address account, uint256 withdrawAmount)
         private
     {
@@ -186,6 +216,8 @@ contract StrongHand is Ownable {
         if (!success) revert SendingEtherFailedError(account);
     }
 
+    //@title Deposit ether to avve pool
+    // @author Stefan Plazic
     function _depositToLendingPool(uint256 depositAmount) private {
         address poolAddress = _getPool();
         weth.deposit{value: depositAmount}();
@@ -198,6 +230,8 @@ contract StrongHand is Ownable {
         );
     }
 
+    //@title Gets pool address, which can change during times
+    // @author Stefan Plazic
     function _getPool() private view returns (address) {
         return poolAddressesProvider.getPool();
     }

@@ -13,7 +13,6 @@ describe("OwnerShip", function () {
 describe("Deposit", function () {
     it("Should allow to deposit ether", async function () {
         const { strongHand, ownerAccount, depositAmount } = await deployStrongHandFixture();
-        // const depositAmount = ethers.utils.parseEther("0.1");
         const previusBalance = await ownerAccount.getBalance();
 
         const txt = await strongHand.connect(ownerAccount).deposit({ value: depositAmount });
@@ -147,7 +146,7 @@ describe("Reedem", function () {
     });
 
     it("Should update dividends correctly for multiple fees", async function () {
-        let reedemTxt, exitAmount, expectedAmmount, otherAccountBlockTime, questAccountBlockTime, dummyAccountBlockTime, currentBlockTime;
+        let reedemTxt, exitAmount, firstExpectedAmmount, secondExpectedAmmount, thirdExpectedAmmount, otherAccountBlockTime, questAccountBlockTime, dummyAccountBlockTime;
         const { strongHand, otherAccount, questAccount, lockTime, dummyAccount, feeStrategyV1, depositAmount } = await deployStrongHandFixture();
 
         otherAccountBlockTime = await getBlockTime((await (await strongHand.connect(otherAccount).deposit({ value: depositAmount })).wait()));
@@ -156,23 +155,22 @@ describe("Reedem", function () {
         //questAccount
         reedemTxt = await (await strongHand.connect(questAccount).reedem()).wait();
         exitAmount = getTransactionArguments(reedemTxt)![1];
-        currentBlockTime = await getBlockTime(reedemTxt);
-        expectedAmmount = depositAmount.sub((await feeStrategyV1.calculateAccountFee(questAccountBlockTime + lockTime, lockTime, depositAmount)));
-        expect(exitAmount).to.be.equal(expectedAmmount);
+
+        firstExpectedAmmount = depositAmount.sub((await feeStrategyV1.calculateAccountFee(questAccountBlockTime + lockTime, lockTime, depositAmount)));
+        expect(exitAmount).to.be.equal(firstExpectedAmmount);
         await increaseTime(lockTime / 2);
         // dummyAccount
         reedemTxt = await (await strongHand.connect(dummyAccount).reedem()).wait();
         exitAmount = getTransactionArguments(reedemTxt)![1];
-        currentBlockTime = await getBlockTime(reedemTxt);
-        expectedAmmount = depositAmount.sub((await feeStrategyV1.calculateAccountFee(dummyAccountBlockTime + lockTime, lockTime, depositAmount))).add(depositAmount.sub(expectedAmmount).div(2));
-        // expect(exitAmount).to.be.equal(expectedAmmount);
+        secondExpectedAmmount = depositAmount.add(depositAmount.sub(firstExpectedAmmount).div(2))
+            .sub((await feeStrategyV1.calculateAccountFee(dummyAccountBlockTime + lockTime, lockTime, depositAmount.add(depositAmount.sub(firstExpectedAmmount).div(2)))));
+        expect(exitAmount).to.be.equal(secondExpectedAmmount);
         await increaseTime(lockTime / 2);
         //otherAccount
         reedemTxt = await (await strongHand.connect(otherAccount).reedem()).wait();
         exitAmount = getTransactionArguments(reedemTxt)![1];
-        currentBlockTime = await getBlockTime(reedemTxt);
-        expectedAmmount = depositAmount.sub((await feeStrategyV1.calculateAccountFee(otherAccountBlockTime + lockTime, lockTime, depositAmount)));
-        // expect(exitAmount).to.be.equal(expectedAmmount);
+        thirdExpectedAmmount = depositAmount.mul(3).sub(firstExpectedAmmount).sub(secondExpectedAmmount);
+        expect(exitAmount).to.be.equal(thirdExpectedAmmount);
     });
 
     it('Should not calculate fees, when reedmer is the only staked user', async function () {
