@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.9;
 
-import "hardhat/console.sol";
 import "../interfaces/IFeeStrategy.sol";
 
 contract FeeStrategyV1 is IFeeStrategy {

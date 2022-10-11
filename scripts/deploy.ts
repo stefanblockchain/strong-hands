@@ -5,7 +5,7 @@ import verify from '../utils/verify';
 async function main() {
   const name = network.name;
   const networkConf = helperConfig.networkConfig.find(el => el.name === network.name);
-  const waitBlockConfirmations = 1;
+  const waitBlockConfirmations = 5;
 
   const feeStrategyArgs: any = [];
   const feeStrategyV1 = await (await ethers.getContractFactory("FeeStrategyV1", feeStrategyArgs)).deploy(...feeStrategyArgs);

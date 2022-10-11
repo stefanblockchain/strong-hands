@@ -1,7 +1,7 @@
 import { expect } from "chai";
 import { ethers, network } from "hardhat";
 
-import helperConfig from "../helper-hardhat-config";
+import helperConfig from "../../helper-hardhat-config";
 
 describe("OwnerShip", function () {
     it("Should set the owner correctly", async function () {
@@ -12,8 +12,8 @@ describe("OwnerShip", function () {
     ;
 describe("Deposit", function () {
     it("Should allow to deposit ether", async function () {
-        const { strongHand, ownerAccount } = await deployStrongHandFixture();
-        const depositAmount = ethers.utils.parseEther("0.1");
+        const { strongHand, ownerAccount, depositAmount } = await deployStrongHandFixture();
+        // const depositAmount = ethers.utils.parseEther("0.1");
         const previusBalance = await ownerAccount.getBalance();
 
         const txt = await strongHand.connect(ownerAccount).deposit({ value: depositAmount });
@@ -28,16 +28,14 @@ describe("Deposit", function () {
     });
 
     it("Should reduce balance in half", async function () {
-        const { strongHand, otherAccount } = await deployStrongHandFixture();
-        const depositAmount = ethers.utils.parseEther("1");
+        const { strongHand, otherAccount, depositAmount } = await deployStrongHandFixture();
         const exitAmount = ethers.utils.parseEther("0.5");
         await strongHand.connect(otherAccount).deposit({ value: depositAmount });
         expect(await strongHand.calculateAccountFee(otherAccount.address)).to.be.equal(exitAmount);
     });
 
     it("Shouldn't reduce balance", async function () {
-        const { strongHand, otherAccount, lockTime } = await deployStrongHandFixture();
-        const depositAmount = ethers.utils.parseEther("1");
+        const { strongHand, otherAccount, lockTime, depositAmount } = await deployStrongHandFixture();
         const feeAmount = ethers.utils.parseEther("0");
         await strongHand.connect(otherAccount).deposit({ value: depositAmount });
         await increaseTime(lockTime);
@@ -57,8 +55,8 @@ describe("Interest", function () {
     });
 
     it("Should allow onwer to take interest", async function () {
-        const { strongHand, ownerAccount, otherAccount, aaveTokenWhale, questAccount, lockTime, pool, weth, weithAToken } = await deployStrongHandFixture();
-        const depositAmount = ethers.utils.parseEther("1");
+        const { strongHand, ownerAccount, otherAccount, aaveTokenWhale, depositAmount, weithAToken } = await deployStrongHandFixture();
+
         const depositDaiAmount = (await weithAToken.balanceOf(aaveTokenWhale.address)).sub((await weithAToken.balanceOf(aaveTokenWhale.address)).div(ethers.utils.parseEther("3")));
         await strongHand.connect(otherAccount).deposit({ value: depositAmount });
         await weithAToken.connect(aaveTokenWhale).transfer(strongHand.address, depositDaiAmount);
@@ -80,8 +78,8 @@ describe("Interest", function () {
 
 describe("Reedem", function () {
     it("Should update reedem time for user", async function () {
-        const { strongHand, otherAccount } = await deployStrongHandFixture();
-        const depositAmount = ethers.utils.parseEther("1");
+        const { strongHand, otherAccount, depositAmount } = await deployStrongHandFixture();
+
         const transation = await strongHand.connect(otherAccount).deposit({ value: depositAmount });
         const prevReedemTime = (await strongHand.getUserDeposit(otherAccount.address)).reedemTime;
         await transation.wait();
@@ -92,8 +90,8 @@ describe("Reedem", function () {
     });
 
     it("Should be able to reedem", async function () {
-        const { strongHand, otherAccount } = await deployStrongHandFixture();
-        const depositAmount = ethers.utils.parseEther("1");
+        const { strongHand, otherAccount, depositAmount } = await deployStrongHandFixture();
+
         await strongHand.connect(otherAccount).deposit({ value: depositAmount });
 
         const prevBalance = await otherAccount.getBalance();
@@ -107,17 +105,14 @@ describe("Reedem", function () {
     });
 
     it("Should emit event when reedeming", async function () {
-        const { strongHand, otherAccount } = await deployStrongHandFixture();
-        const depositAmount = ethers.utils.parseEther("1");
+        const { strongHand, otherAccount, depositAmount } = await deployStrongHandFixture();
 
         await strongHand.connect(otherAccount).deposit({ value: depositAmount });
         await expect(strongHand.connect(otherAccount).reedem()).to.emit(strongHand, "ReedemEvent");
-
     });
 
     it("Should return unchange amount", async function () {
-        const { strongHand, otherAccount, lockTime } = await deployStrongHandFixture();
-        const depositAmount = ethers.utils.parseEther("1");
+        const { strongHand, otherAccount, lockTime, depositAmount } = await deployStrongHandFixture();
 
         await strongHand.connect(otherAccount).deposit({ value: depositAmount });
         await increaseTime(lockTime);
@@ -129,8 +124,7 @@ describe("Reedem", function () {
     it("Should increase balance", async function () {
         let reedemTxt, args, exitAmount, prevBalance, gasPaid, currBalance;
 
-        const { strongHand, otherAccount, questAccount, lockTime } = await deployStrongHandFixture();
-        const depositAmount = ethers.utils.parseEther("1");
+        const { strongHand, otherAccount, questAccount, lockTime, depositAmount } = await deployStrongHandFixture();
 
         await strongHand.connect(otherAccount).deposit({ value: depositAmount });
         await strongHand.connect(questAccount).deposit({ value: depositAmount });
@@ -153,10 +147,8 @@ describe("Reedem", function () {
     });
 
     it("Should update dividends correctly for multiple fees", async function () {
-        let reedemTxt, exitAmount, depositAmount, expectedAmmount, otherAccountBlockTime, questAccountBlockTime, dummyAccountBlockTime, currentBlockTime;
-        const { strongHand, otherAccount, questAccount, lockTime, dummyAccount, feeStrategyV1 } = await deployStrongHandFixture();
-
-        depositAmount = ethers.utils.parseEther("1");
+        let reedemTxt, exitAmount, expectedAmmount, otherAccountBlockTime, questAccountBlockTime, dummyAccountBlockTime, currentBlockTime;
+        const { strongHand, otherAccount, questAccount, lockTime, dummyAccount, feeStrategyV1, depositAmount } = await deployStrongHandFixture();
 
         otherAccountBlockTime = await getBlockTime((await (await strongHand.connect(otherAccount).deposit({ value: depositAmount })).wait()));
         questAccountBlockTime = await getBlockTime((await (await strongHand.connect(questAccount).deposit({ value: depositAmount })).wait()));
@@ -184,10 +176,9 @@ describe("Reedem", function () {
     });
 
     it('Should not calculate fees, when reedmer is the only staked user', async function () {
-        let depositAmount, exitAmount, reedemTxt;
-        const { strongHand, otherAccount } = await deployStrongHandFixture();
+        let exitAmount, reedemTxt;
+        const { strongHand, otherAccount, depositAmount } = await deployStrongHandFixture();
 
-        depositAmount = ethers.utils.parseEther("1");
         await strongHand.connect(otherAccount).deposit({ value: depositAmount });
         reedemTxt = await (await strongHand.connect(otherAccount).reedem()).wait();
         exitAmount = getTransactionArguments(reedemTxt)![1];
@@ -195,10 +186,8 @@ describe("Reedem", function () {
     });
 
     it('Should keep user unclaimed dividends, when he deposits again', async function () {
-        let depositAmount, prevLastDivident, currLastDivident;
-        const { strongHand, otherAccount, questAccount } = await deployStrongHandFixture();
-
-        depositAmount = ethers.utils.parseEther("1");
+        let prevLastDivident, currLastDivident;
+        const { strongHand, otherAccount, questAccount, depositAmount } = await deployStrongHandFixture();
 
         await strongHand.connect(otherAccount).deposit({ value: depositAmount });
         await strongHand.connect(questAccount).deposit({ value: depositAmount });
@@ -207,19 +196,20 @@ describe("Reedem", function () {
         prevLastDivident = (await strongHand.getUserDeposit(otherAccount.address)).lastDivident;
         await strongHand.connect(otherAccount).deposit({ value: depositAmount });
         currLastDivident = (await strongHand.getUserDeposit(otherAccount.address)).lastDivident;
-        
+
         expect(prevLastDivident).to.be.equal(currLastDivident);
     });
 });
 
 
 async function deployStrongHandFixture() {
-    let strongHand, feeStrategyV1, networkConf: any, lockTime, ownerAccount, otherAccount, questAccount, poolAddressesProvider, pool, weth, aaveTokenWhale, weithAToken, dummyAccount;
+    let strongHand, feeStrategyV1, networkConf: any, lockTime, ownerAccount, otherAccount, questAccount, poolAddressesProvider, pool, weth, aaveTokenWhale, weithAToken, dummyAccount, depositAmount;
 
     [ownerAccount, otherAccount, questAccount, dummyAccount] = await ethers.getSigners();
 
     lockTime = 24 * 60 * 60;
     networkConf = helperConfig.networkConfig.find(el => el.name === network.name);
+    depositAmount = ethers.utils.parseEther("1");
 
     feeStrategyV1 = await (await ethers.getContractFactory("FeeStrategyV1")).deploy();
 
@@ -233,7 +223,7 @@ async function deployStrongHandFixture() {
     weithAToken = await ethers.getContractAt("IWETH", networkConf.weithAToken);
     aaveTokenWhale = await ethers.getImpersonatedSigner(networkConf.weithATokenWhale);
 
-    return { strongHand, feeStrategyV1, ownerAccount, otherAccount, questAccount, dummyAccount, lockTime, poolAddressesProvider, pool, weth, aaveTokenWhale, weithAToken };
+    return { strongHand, feeStrategyV1, ownerAccount, otherAccount, questAccount, dummyAccount, lockTime, poolAddressesProvider, pool, weth, aaveTokenWhale, weithAToken, depositAmount };
 }
 
 async function calculateTransactionPrice(transaction: any) {
